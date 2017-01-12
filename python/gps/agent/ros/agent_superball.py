@@ -87,7 +87,7 @@ class AgentSUPERball(Agent):
         Agent.__init__(self, config)
 
         self._sensor_types = set(self.x_data_types + self.obs_data_types)
-        self.x0 = None  # FIXME: not sure if x0 is actually used somewhere.
+        self.x0 = None
         self._sensor_readings = {}
         self._prev_sensor_readings = {}
         self._prev2_sensor_readings = {}
@@ -133,8 +133,8 @@ class AgentSUPERball(Agent):
         self._prev2_sensor_readings = copy.deepcopy(self._prev_sensor_readings)
         self._prev_sensor_readings = copy.deepcopy(self._sensor_readings)
         self._sensor_readings = {}
-        # Absolute bar endpoint positions.
 
+        # Absolute bar endpoint positions.
         bar_endpt_pos = []
         for i in range(6):
             pos1, pos2 = msg.states[i].pos1, msg.states[i].pos2
@@ -171,6 +171,7 @@ class AgentSUPERball(Agent):
             pos1, pos2 = msg.states[i].pos1, msg.states[i].pos2
             bar_endpt_pos += [[pos1.x, pos1.y, pos1.z], [pos2.x, pos2.y, pos2.z]]
         bar_endpt_pos = np.array(bar_endpt_pos)
+
         # Compute relative position for translational invariance
         bar_endpt_pos = bar_endpt_pos - np.mean(bar_endpt_pos, axis=0, keepdims=True)
 
@@ -209,7 +210,6 @@ class AgentSUPERball(Agent):
         self._sensor_readings[SUPERBALL_PTRIS] = np.hstack(
             [horizontal_angle[1:], vertical_angle]
         ).flatten()
-
 
         # Compute velocity
         for sensor in SUPERBALL_COMPUTE_VELOCITY:
@@ -254,13 +254,8 @@ class AgentSUPERball(Agent):
         node_accel = self._sensor_readings[BAR_ENDPOINT_ACCELERATIONS].copy().reshape(12, 3)
         node_accel = np.sum(node_accel * node_vec, axis=1)
         projected_gravity = np.dot(node_vec, np.array([0, 0, -9.81]))
-        # print "node accel: ", node_accel
-        # print "gravity: ", projected_gravity
         bar_accel = node_accel + projected_gravity
-        # bar_accel = projected_gravity
         self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS] = bar_accel
-
-
 
         # Add noise to sensor
         if 'sensors_noise' in self._hyperparams:
@@ -268,24 +263,13 @@ class AgentSUPERball(Agent):
                 for sensor_type in self._sensor_readings:
                     stddev = self._hyperparams['sensors_noise']
                     noise = np.random.randn(*self._sensor_readings[sensor_type].shape) * stddev
-                    # truncate_limit = 100
-                    # noise[noise < -truncate_limit * stddev] = -truncate_limit * stddev
-                    # noise[noise > truncate_limit * stddev] = truncate_limit * stddev
                     self._sensor_readings[sensor_type] += noise
             else:
                 for sensor_type in self._sensor_readings:
                     if sensor_type in self._hyperparams['sensors_noise']:
                         stddev = self._hyperparams['sensors_noise'][sensor_type]
                         noise = np.random.randn(*self._sensor_readings[sensor_type].shape) * stddev
-                        # truncate_limit = 100
-                        # noise[noise < -truncate_limit * stddev] = -truncate_limit * stddev
-                        # noise[noise > truncate_limit * stddev] = truncate_limit * stddev
                         self._sensor_readings[sensor_type] += noise
-
-        # self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS][7] = 0
-        # self._sensor_readings[MOTOR_POSITIONS][6] = 0.95
-
-
 
         self._state_update = True
         self._state_update_cv.notify()
@@ -331,10 +315,7 @@ class AgentSUPERball(Agent):
             self.relax()
         new_sample = self._init_sample(horizon)
         U = np.zeros([horizon, self.dU])
-        # noise = generate_noise(self.T, self.dU, smooth=self._hyperparams['smooth_noise'],
-        #         var=self._hyperparams['smooth_noise_var'],
-        #         renorm=self._hyperparams['smooth_noise_renormalize'])
-        noise = generate_noise(horizon, self.dU, self._hyperparams)  # FIXME: looks right?
+        noise = generate_noise(horizon, self.dU, self._hyperparams)
         for t in range(horizon):
             X_t = new_sample.get_X(t=t)
             obs_t = new_sample.get_obs(t=t)
@@ -345,9 +326,6 @@ class AgentSUPERball(Agent):
                 for elem in X_t[X_t.shape[0] - 24:X_t.shape[0] - 12]:
                     sys.stdout.write('{}, '.format(elem))
                 sys.stdout.write('],\n')
-
-            # print obs_t
-
 
             U[t,:] = U_t
             if (t+1) < horizon:
@@ -361,9 +339,6 @@ class AgentSUPERball(Agent):
                     pyscreenshot.grab(bbox=(65, 50, 705, 530)).save(img)
                 self._set_sample(new_sample, t)
         new_sample.set(ACTION, U)
-        # with open('actions.pkl', 'w') as fout:
-        #     pickle.dump(U, fout)
-        # os._exit(0)
         if save:
             self._samples[condition].append(new_sample)
 
@@ -387,9 +362,6 @@ class AgentSUPERball(Agent):
         if (pos - 0.95).all() and self._hyperparams['constraint']:
             pos = self._constraint.find_nearest_valid_values(pos)
         for i in range(12):
-            # msg.data = (0.95 - pos[i]) / 0.009
-            # if i == 6:
-            #     continue
             msg.data = min(max(7.5, ((0.95 - pos[i]) * gain)), 40)
             self._motor_pubs[i].publish(msg)
 
@@ -410,7 +382,6 @@ class AgentSUPERball(Agent):
 
         self._state_update_cv.acquire()
         while not self._state_update:
-            #time.sleep(0.001)
             self._state_update_cv.wait()
         self._state_update = False
 
@@ -434,12 +405,10 @@ class AgentSUPERball(Agent):
             self._advance_simulation()
 
     def relax(self):
-        # print 'Relaxing'
         self._set_motor_positions(np.ones(12) * 0.95)
         time.sleep(0.5)
         for _ in range(30):
             self._advance_simulation()
-        # print 'Relaxed!'
 
     def dist_traveled(self, sample, T):
         pos = sample.get(BAR_ENDPOINT_POSITIONS)

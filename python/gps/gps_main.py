@@ -67,7 +67,6 @@ class GPSMain(object):
         itr_start = self._initialize(itr_load)
 
         for itr in range(itr_start, self._hyperparams['iterations']):
-            # FIXME: exchanged loop order for superball sampling
             for i in range(self._hyperparams['num_samples']):
                 for cond in self._train_idx:
                     self._take_sample(itr, cond, i)
@@ -85,7 +84,6 @@ class GPSMain(object):
                 pol_sample_lists = self._take_policy_samples()
             self._log_data(itr, traj_sample_lists, pol_sample_lists)
 
-            # FIXME: save controller for superball
             if 'save_controller' in self._hyperparams and self._hyperparams['save_controller']:
                 self._save_superball_controllers()
 
@@ -105,7 +103,7 @@ class GPSMain(object):
         self.algorithm = self.data_logger.unpickle(algorithm_file)
         if self.algorithm is None:
             print("Error: cannot find '%s.'" % algorithm_file)
-            os._exit(1) # called instead of sys.exit(), since t
+            os._exit(1)
         traj_sample_lists = self.data_logger.unpickle(self._data_files_dir +
             ('traj_sample_itr_%02d.pkl' % itr))
 
@@ -140,7 +138,7 @@ class GPSMain(object):
             self.algorithm = self.data_logger.unpickle(algorithm_file)
             if self.algorithm is None:
                 print("Error: cannot find '%s.'" % algorithm_file)
-                os._exit(1) # called instead of sys.exit(), since this is in a thread
+                os._exit(1)
 
             if self.gui:
                 traj_sample_lists = self.data_logger.unpickle(self._data_files_dir +
@@ -164,7 +162,6 @@ class GPSMain(object):
             i: Sample number.
         Returns: None
         """
-        # FIXME: extra args for superball agent.
         extra_args = {}
         if type(self.agent) == AgentSUPERball:
             extra_args = {
@@ -192,7 +189,6 @@ class GPSMain(object):
                 }
             }
 
-        # pol = self.algorithm.cur[cond].traj_distr
         if self.algorithm._hyperparams['sample_on_policy'] \
                 and (self.algorithm.iteration_count > 0
                      or ('sample_pol_first_itr' in self.algorithm._hyperparams
@@ -202,7 +198,7 @@ class GPSMain(object):
             pol = self.algorithm.cur[cond].traj_distr
 
         if self.gui:
-            self.gui.set_image_overlays(cond)   # Must call for each new cond.
+            self.gui.set_image_overlays(cond)  # Must call for each new cond.
             redo = True
             while redo:
                 while self.gui.mode in ('wait', 'request', 'process'):
@@ -263,23 +259,16 @@ class GPSMain(object):
             N  : number of policy samples to take per condition
         Returns: None
         """
-        # if 'verbose_policy_trials' not in self._hyperparams:
-        #     return None
         if not N:
             N = self._hyperparams['verbose_policy_trials']
         if self.gui:
             self.gui.set_status_text('Taking policy samples.')
 
-        # if 'verbose_policy_trials' not in self._hyperparams:
-        #     # AlgorithmTrajOpt
-        #     return None
         verbose = self._hyperparams['verbose_policy_trials']
         if self.gui:
             self.gui.set_status_text('Taking policy samples.')
         pol_samples = [[None] for _ in range(len(self._test_idx))]
         # Since this isn't noisy, just take one sample.
-        # TODO: Make this noisy? Add hyperparam?
-        # TODO: Take at all conditions for GUI?
         for cond in range(len(self._test_idx)):
             extra_args = {}
             if type(self.agent) == AgentSUPERball:

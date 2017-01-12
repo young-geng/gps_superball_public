@@ -1,3 +1,5 @@
+"""Convenience script for running a policy on the real SUPERball."""
+
 import copy
 import numpy as np
 import scipy.ndimage as sp_ndimage
@@ -28,7 +30,6 @@ try:
     Float32 = TimestampedFloat32
     USE_F32 = False
 except ImportError:
-    # LOGGER.debug('No TimestampedFloat32 found, using Float32 instead.')
     USE_F32 = True
 
 
@@ -53,7 +54,6 @@ SUPERBALL_IMU_TOPICS = ["/bbb2/0x71_imu_data",
                         "/bbb12/0x1_imu_data"]
 
 HYPERPARAMS = {
-    # 'state_estimator': True,
     'dt': 0.1,
     'T': 50,
     'sensor_dims': SUPERBALL_SENSOR_DIMS,
@@ -105,10 +105,12 @@ class AgentSUPERball(object):
     """
     All communication between the algorithms and the SUPERball simulation is done through this class.
     """
-    def __init__(self):
+    def __init__(self, use_acc_only):
         self._init_obs()
         config = copy.deepcopy(HYPERPARAMS)
         self._hyperparams = config
+
+        self._use_acc_only = use_acc_only
 
         if self._hyperparams['constraint']:
             import superball_kinematic_tool as skt
@@ -143,9 +145,7 @@ class AgentSUPERball(object):
     def _continue_simulation(self):
         rate = rospy.Rate(10)
         while True:
-            # if self._run_sim:
             self._timestep_pub.publish(UInt16(100))
-            # time.sleep(0.099)
             rate.sleep()
 
 
@@ -153,9 +153,7 @@ class AgentSUPERball(object):
         with self._obs_update_lock:
             motor_pos = np.array(msg.data[-12:])
             indices = np.logical_not(np.isnan(motor_pos))
-            # self._sensor_readings[MOTOR_POSITIONS][indices] = 0.95 - np.abs(0.009 * motor_pos[indices])
             self._sensor_readings[MOTOR_POSITIONS][indices] = 0.95 - np.abs(0.009 * np.maximum(0, motor_pos[indices] - 7.5))
-            # self._sensor_readings[MOTOR_POSITIONS][6] = 0.95
 
     def _imu_cb(self, msg):
         with self._obs_update_lock:
@@ -167,8 +165,6 @@ class AgentSUPERball(object):
                 else:
                     index -=1
                 self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS][index] = msg.linear_acceleration.y
-
-            # self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS][7] = 0
 
     def _init_motor_pubs(self):
         self._motor_pubs = []
@@ -186,23 +182,23 @@ class AgentSUPERball(object):
 
     @property
     def obs(self):
-        return np.concatenate([
-            self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS],
-            self._sensor_readings[MOTOR_POSITIONS]
-        ])
+        if self._use_acc_only:
+            return self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS]
+        else:
+            return np.concatenate([
+                self._sensor_readings[SUPERBALL_BAR_ACCELERATIONS],
+                self._sensor_readings[MOTOR_POSITIONS]
+            ])
 
     def sample(self, policy, horizon):
         self._init_obs()
         self.relax()
 
-        # noise = np.zeros_like(generate_noise(horizon, 12))
         noise = generate_noise(horizon, 12)
         self._run_sim = True
         actions = []
         for t in range(horizon):
             obs_t = self.obs
-            # if t < 10:
-            print obs_t
             U_t = policy.act(np.zeros_like(obs_t), obs_t, t, noise[t,:])
             actions.append(U_t)
             self._set_motor_positions(U_t)
@@ -212,7 +208,6 @@ class AgentSUPERball(object):
         actions = np.vstack(actions)
         return actions
 
-
     def _set_motor_positions(self, pos):
         gain = 1 / 0.009
         msg = Float32()
@@ -221,19 +216,12 @@ class AgentSUPERball(object):
         if (pos - 0.95).all() and self._hyperparams['constraint']:
             pos = self._constraint.find_nearest_valid_values(pos)
         for i in range(12):
-            # msg.data = (0.95 - pos[i]) / 0.009
-            # if i == 6:
-            #     continue
-            msg.data = min(max(7.5, ((0.95 - pos[i]) * gain) + (7.5 / gain)), 45)
+            msg.data = min(max(7.5, ((0.95 - pos[i]) * gain) + (7.5 / gain)), 40)
             self._motor_pubs[i].publish(msg)
 
     def relax(self):
-        # print 'Relaxing'
         self._set_motor_positions(np.ones(12) * 0.95)
         self.advance_simulation(30)
-        # print "Press enter to continue"
-        # raw_input()
-        # print 'Relaxed!'
 
     def reset(self, bottom_face=0):
         rospy.set_param('/bottom_face', bottom_face + 1)
@@ -241,16 +229,11 @@ class AgentSUPERball(object):
 
     def advance_simulation(self, step=1):
         for _ in xrange(step):
-            # self._timestep_pub.publish(UInt16(100))
-            # time.sleep(0.095)
-            # time.sleep(0.01)
             self._action_rate.sleep()
 
     def replay_actions(self, actions):
         for t in range(actions.shape[0]):
             obs_t = self.obs
-            # if t < 10:
-            print obs_t
             U_t = actions[t, :]
             self._set_motor_positions(U_t)
             self.advance_simulation()
@@ -263,12 +246,13 @@ if __name__ == '__main__':
                         help='number of time steps')
     parser.add_argument('-r', '--replay', action='store_true', help='replay actions')
     parser.add_argument('-s', '--store_actions', type=str, help='store policy actions')
+    parser.add_argument('-a', '--use_acc_only', action='store_true', help='use acceleration observation')
     args = parser.parse_args()
 
     with open(args.policy) as fin:
         policy = pickle.load(fin)
 
-    agent = AgentSUPERball()
+    agent = AgentSUPERball(args.use_acc_only)
     agent.reset()
     agent.relax()
     if args.replay:
